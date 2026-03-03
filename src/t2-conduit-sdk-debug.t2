@@ -1,0 +1,25 @@
+(program
+  ;; deep clone helper
+  (defmacro deep-clone ((x))
+    `(structuredClone ,x))
+
+  ;; map
+  (defmacro map ((arr) (mfn))
+    `(Array.prototype.map.call (deep-clone ,arr) ,mfn))
+
+  ;; filter
+  (defmacro filter ((arr) (ffn))
+    `(Array.prototype.filter.call (deep-clone ,arr) ,ffn))
+
+  ;; reduce
+  (defmacro reduce ((arr) (rfn) (init))
+    `(Array.prototype.reduce.call (deep-clone ,arr) ,rfn ,init))
+
+  ;; concat
+  (defmacro concat ((a) (b))
+    `(Array.prototype.concat.call (deep-clone ,a) (deep-clone ,b)))
+
+  ;; assign
+  (defmacro assign ((obj) (updates))
+    `(Object.assign (deep-clone ,obj) ,updates))
+)
