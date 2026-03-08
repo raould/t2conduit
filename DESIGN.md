@@ -384,3 +384,65 @@ The MVP design focuses on:
 * **Exception-safe resource management** via `await using` on the runner-owned context.
 * **Instrumentation** integrated at the generator boundary, not the stage invocation.
 * Minimal complexity in stages and runner to allow **iterative future improvements**.
+
+---
+
+## 5. Comparison with Other Approaches
+
+### 5.1 Standard JS/TS Approaches
+
+| Approach | Model | Backpressure | Type Safety | Resource Mgmt | Notes |
+|---|---|---|---|---|---|
+| **Node.js Streams** | Push + paused pull | `highWaterMark` / `drain` | Weak | Manual `.destroy()` | Complex legacy API (streams1/2/3); widespread but error-prone |
+| **Web Streams** (`ReadableStream`) | Pull | Built-in via BYOB | Reasonable | `cancel()` / `abort()` | Better designed; available Node 16+; no stage composition API |
+| **Raw async generators** | Pull | Inherent | Strong | `try/finally` only | t2-conduit's own foundation — no capabilities, instrumentation, or pipeline assembly |
+| **`Promise.all` + arrays** | Batch | None | Strong | N/A | Materialises everything; fine for small data, not streaming |
+
+### 5.2 Libraries
+
+| Library | Model | Foundation | Type Safety | Capability Injection | Resource Mgmt | Error Handling |
+|---|---|---|---|---|---|---|
+| **RxJS** | Push (Observable) | Custom | Good | None | `finalize()` operator | `catchError`, retry operators |
+| **IxJS** | Pull | Async iterables | Good | None | `finally()` operator | Limited |
+| **Highland.js** | Pull | Node streams | Poor (unmaintained) | None | Via streams | Limited |
+| **Scramjet** | Push/pull | Node streams | Reasonable | None | Via streams | Promise-based |
+| **Effect-TS** | Pull + effects | Custom (fibres) | Excellent | Effect environment (`R`) | `acquireRelease` | Typed errors (`E`) |
+
+### 5.3 Narrative
+
+**Node.js Streams** are the most widely deployed but arguably the worst designed. Backpressure requires manually checking return values of `.write()` and listening for `'drain'`. Error handling is event-based (`'error'` event) — uncaught errors crash the process. Resource cleanup is manual and fragile across stream chains. `stream.pipeline()` helps but doesn't fix the underlying model.
+
+**Web Streams** are better designed but thin — `pipeThrough` and `pipeTo` compose streams, but there's no concept of named stages, capability injection, typed sequencing, or instrumentation. It's a browser primitive, not a framework.
+
+**RxJS** is the dominant reactive library in JS. It's excellent for event-driven/UI work (the original use case) but a poor fit for data pipelines: push semantics mean backpressure requires explicit operators, operators like `switchMap` silently drop in-flight work, and there's no structured resource lifecycle. The operator library is enormous but often misused for pipeline work.
+
+**IxJS** (Microsoft's Interactive Extensions) is the closest foundation to t2-conduit — it's built on async iterables, pull-based, and has reasonable TypeScript support. It provides a rich operator set (`map`, `filter`, `flatMap`, `take`, etc.). What it lacks: no capability injection, no named slots, no structured error modes, no `await using` resource lifecycle, no instrumentation hooks. It's a good utility library for working with async iterables, not a pipeline framework.
+
+**Effect-TS** is the most architecturally comparable to t2-conduit's goals. It has typed errors (`E`), a typed environment (`R`, analogous to `Ctx`), and `acquireRelease` for `ResourceT`-style cleanup. Its `Stream` module is pull-based. The key difference: Effect-TS is a **full effect system** — you're opting into a comprehensive programming model (fibres, scheduling, dependency injection, tracing). t2-conduit aims to be a narrow, focused pipeline framework that uses TypeScript and standard JS primitives (`async function*`, `await using`) rather than a parallel runtime.
+
+### 5.4 Where t2-conduit Sits
+
+```
+                   Narrow ◄────────────────────────────► Comprehensive
+
+Raw generators → IxJS → t2-conduit → Effect-TS Stream
+                              ↑
+                    Pipeline framework:
+                    typed stages, capabilities,
+                    named slots, await using,
+                    error modes, instrumentation
+
+Node Streams / Web Streams → orthogonal (push-first, built-in primitives)
+RxJS → orthogonal (reactive/event-driven)
+```
+
+**t2-conduit's distinguishing features** that no other JS/TS library has together:
+
+1. **Per-stage capability injection via named slots** — typed, structural, compile-time checked.
+2. **`await using` context lifecycle** — leverages TS 5.2 `AsyncDisposable` rather than a custom effect system.
+3. **`PureStage` marker** — explicit opt-in for safe instance reuse.
+4. **Explicit error modes** (fail-fast / drop / propagate) configured per pipeline.
+5. **Generator-boundary instrumentation** rather than stage-invocation hooks.
+
+The closest prior art is Effect-TS's `Stream + Layer` system, but t2-conduit deliberately avoids the full effect system overhead — you bring your own `AppContext` class; the framework does not own your dependency injection container.
+
