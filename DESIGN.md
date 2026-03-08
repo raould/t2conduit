@@ -1,560 +1,182 @@
-# t2-conduit MVP Design Document
+Here’s a fully updated and expanded **t2-conduit design doc** integrating the latest decisions—including **reducers for stages**, **Instrumentation Layer for logging**, and the other MVP choices. I’ve structured it so it can serve as a baseline for iteration.
+
+---
+
+# t2-conduit Design Document (MVP)
 
 ## 1. Overview
 
-**t2-conduit** is a lightweight pipeline execution framework intended for **TypeScript environments**. It enables developers to compose reusable **stages** into **typed pipelines** that process data sequentially.
+**t2-conduit** is a **typed, linear, pull-based pipeline framework** for TypeScript.
+It is designed to allow **simple, composable data transformations** while supporting:
 
-The MVP focuses on:
+* Pull-based execution (consumer-driven).
+* Async-by-default stages.
+* Minimal SDK wrapping.
+* Reducer-style stage definitions.
+* Instrumented logging for debugging and observability.
+* Compile-time type checking between stages.
+* Future extensibility (fusion, batch-aware sinks, metadata automation).
 
-* **Linear pipelines**
-* **Async stage execution**
-* **Compile-time type compatibility**
-* **Runner-mediated orchestration**
-* **Per-stage logging contexts**
+### Goals
 
-The design intentionally excludes more complex features such as branching, routing graphs, and automatic metadata derivation from types. These may be added in future versions.
-
----
-
-# 2. Core Architectural Principles
-
-The architecture follows several strict invariants.
-
-### 2.1 Stages Are Pipeline-Agnostic
-
-Stages must not know:
-
-* what pipeline they belong to
-* which stages run before or after them
-* how routing works
-
-Stages only perform computation.
-
-```
-input → output
-```
+* MVP that is **usable in real projects** without requiring AST-level macro work.
+* Simple stage API that is **typed and composable**.
+* Instrumentation hooks without over-complicating stage implementation.
+* Allow multiple SDK implementations in the future (e.g., debug vs. performant).
 
 ---
 
-### 2.2 Runner Owns Orchestration
+## 2. Core Concepts
 
-All pipeline execution is mediated by a **runner**.
+### 2.1 Pull-Based Execution
 
-The runner is responsible for:
+* **Consumer-driven (“vend”)**: downstream requests drive upstream data.
+* **Stages only compute when requested**, avoiding unnecessary computation.
+* **No hidden data drops** unless explicitly handled.
+* MVP semantics: **linear, single-item flow** (batches and parallelism deferred to future improvements).
 
-* stage scheduling
-* async execution
-* error handling
-* drop semantics
-* stage log creation
-* log aggregation
+> **Todo:** Appendix with full mermaid interaction diagrams showing request → response flow.
 
-Stages never call other stages.
+**Comparison vs Push (rxjs-style)**
 
----
+| Aspect       | Pull (“vend”)                       | Push (“stream”)                |
+| ------------ | ----------------------------------- | ------------------------------ |
+| Who drives   | Consumer                            | Producer                       |
+| Backpressure | Natural; consumer controls rate     | Must debounce/drop explicitly  |
+| Hidden drops | Possible if pre-source is unmanaged | More obvious; sink must handle |
+| Use cases    | Transform pipelines, dataflow       | UI updates, reactive streams   |
 
-### 2.3 Pipelines Are Linear (MVP)
-
-The MVP supports **strictly linear pipelines**:
-
-```
-StageA → StageB → StageC
-```
-
-No branching or routing exists in the MVP runtime.
-
-Future versions may extend pipelines into DAG execution graphs.
+**Escape hatch:** `poll()` to request data only if immediately available.
 
 ---
 
-### 2.4 Compile-Time Type Safety
+### 2.2 Minimal SDK Wrapping
 
-Stage compatibility is enforced at **compile time**.
-
-For adjacent stages:
-
-```
-Output(StageN) must be assignable to Input(StageN+1)
-```
-
-Type validation occurs during compilation using generated TypeScript type constraints.
+* Wrap standard JS/TS APIs for **purity and immutability**.
+* MVP: **deep-clone wrapper** (`t2-conduit-sdk-debug`) to simplify debugging.
+* Future SDK implementations may optimize performance.
+* API mirrors JS stdlib naming for familiarity.
 
 ---
 
-# 3. Core Concepts
+### 2.3 Async by Default
 
-## 3.1 Stage
-
-A **stage** is a reusable processing unit.
-
-It has:
-
-* an input type
-* an output type
-* a log type
-
-### Stage Interface
-
-```
-Stage<I, O, L>
-```
-
-Where:
-
-| Parameter | Meaning        |
-| --------- | -------------- |
-| I         | input type     |
-| O         | output type    |
-| L         | stage log type |
+* All stages are **async functions** by default.
+* SDK provides common async operators: `debounce`, `filter`, `merge`.
+* Flattening handled internally (async stage returning another async stage).
+* Minimal visual illustration included; detailed interaction diagrams deferred to appendix.
+* **Debugging simplicity**: per-stage log context; stack traces may still be async-fragmented but instrumentation aids tracing.
 
 ---
 
-### Stage Definition
+### 2.4 Metadata & Determinism
 
-```
-interface Stage<I, O, L> {
-
-  name: string
-
-  createLog(): L
-
-  process(
-    input: I,
-    log: L
-  ): Promise<Result<Option<O>, Error>>
-}
-```
+* MVP **does not automatically derive metadata from types**.
+* Users must annotate **Det<T>** or **Nondet<T>** explicitly.
+* Async behavior detected automatically from stage signature.
+* Metadata only needed for advanced pipeline analysis (future improvement).
 
 ---
 
-### Responsibilities
+### 2.5 Stage Design
 
-A stage:
+* Each stage is a **reducer-style function**:
 
-* receives input
-* mutates its log
-* returns a result
+```ts
+type Stage<I, O> = (step: (acc: any, out: O) => any) =>
+                   (acc: any, input: I) => any;
+```
 
-A stage **does not**:
-
-* choose the next stage
-* access other stage logs
-* interact with the pipeline definition
+* Input type `I`, output type `O` are fully generic.
+* **No assumption about batching**; `I` may be a single value or a collection.
+* Stage **does not know about other stages**; the runner orchestrates sequencing.
+* Reducers allow potential parallelism/fusion in future versions.
 
 ---
 
-# 4. Result Semantics
+### 2.6 Runner
 
-Stages return:
+* The **runner** is the only intermediary between stages.
+* Default MVP runner is **async**.
+* Responsible for:
 
-```
-Result<Option<O>, Error>
-```
-
-This supports three outcomes.
-
-| Return Value      | Meaning           |
-| ----------------- | ----------------- |
-| `Ok(Some(value))` | continue pipeline |
-| `Ok(None)`        | drop item         |
-| `Err(error)`      | pipeline failure  |
+  * Executing stages sequentially.
+  * Managing **instrumentation hooks**.
+  * Maintaining per-stage logs (global per stage, not per item).
+  * Handling errors according to fail-fast semantics.
 
 ---
 
-### Continue
+### 2.7 Instrumentation Layer
 
-```
-Ok(Some(output))
-```
+* Replaces the previous logging-before/after-stage mechanism.
+* Owned and configured by the runner.
+* Provides hooks for:
 
-The pipeline proceeds to the next stage.
+  * Before stage execution.
+  * After stage execution.
+  * On stage error.
+* Instrumentation can append arbitrary data to stage log context.
+* Log context **isolated per stage**, preventing interference between stages.
+* Supports extensibility for future AOP-like plugins (currently only logging).
 
----
+**Example pseudocode:**
 
-### Drop
-
-```
-Ok(None)
-```
-
-The item stops processing and exits the pipeline.
-
-No further stages run.
-
----
-
-### Failure
-
-```
-Err(error)
-```
-
-The entire pipeline execution fails.
-
----
-
-# 5. Pipeline Definition
-
-Pipelines define an ordered sequence of stages.
-
-Example:
-
-```
-pipeline UserSessionPipeline {
-
-  ParseJson
-  ValidateUser
-  CreateSession
-
-}
-```
-
-This expands into a linear stage list:
-
-```
-[
-  ParseJson,
-  ValidateUser,
-  CreateSession
-]
+```ts
+runner.instrumentation.before(stage, stageLog);
+await stage(input);
+runner.instrumentation.after(stage, stageLog);
 ```
 
 ---
 
-# 6. Compile-Time Type Validation
+### 2.8 Errors
 
-The pipeline macro generates compile-time checks between adjacent stages.
+* Fail-fast by default (pipeline stops on first stage error).
+* Per-item error handling deferred to future enhancements.
+* Errors carry:
 
-Conceptually:
-
-```
-AssertAssignable<
-  OutputOf<ParseJson>,
-  InputOf<ValidateUser>
->
-
-AssertAssignable<
-  OutputOf<ValidateUser>,
-  InputOf<CreateSession>
->
-```
-
-If a mismatch exists, compilation fails.
-
-Example error:
-
-```
-Pipeline type mismatch:
-
-Stage ParseJson produces: Json
-Stage SendEmail expects: Email
-```
+  * Fixed error codes (`T2C-001`, `T2C-002`, etc.)
+  * Source span (where available)
+  * Stage context
+  * Optional instrumentation log snapshot
 
 ---
 
-# 7. Pipeline Runner
+### 2.9 Logging
 
-The runner executes stages sequentially.
-
-Execution is **asynchronous**.
-
-### Runner Responsibilities
-
-The runner:
-
-* creates stage logs
-* invokes stages
-* aggregates logs
-* enforces drop/failure semantics
+* Logs are **threaded through the runner**, not stages directly.
+* Stage log context is **created by the runner**, passed into stage execution.
+* Accumulated logs returned at pipeline completion.
+* Provides visibility into pipeline execution without polluting stage logic.
 
 ---
 
-### Runner Algorithm
+### 2.10 Types & Compile-Time Checking
 
-```
-async runPipeline(stages, input):
-
-  value = input
-  logs = []
-
-  for stage in stages:
-
-      log = stage.createLog()
-
-      result = await stage.process(value, log)
-
-      logs.push({
-          stage: stage.name,
-          data: log
-      })
-
-      match result:
-
-          Ok(Some(v)):
-              value = v
-              continue
-
-          Ok(None):
-              return {
-                  result: null,
-                  logs
-              }
-
-          Err(e):
-              throw PipelineError(e, logs)
-
-  return {
-      result: value,
-      logs
-  }
-```
+* Stage inputs and outputs checked at **compile time** in TypeScript.
+* MVP ensures **type-safe sequencing** of stages.
+* No implicit coercions or automatic batching; developer handles data shapes.
 
 ---
 
-# 8. Stage Logging System
+### 2.11 Future Improvements
 
-Each stage receives a **private log context**.
-
-Properties:
-
-* created once per stage execution
-* mutable by the stage
-* inaccessible to other stages
-
-The runner aggregates all logs.
+* AST inspection macros for automatic metadata derivation.
+* Stream fusion for performance optimization.
+* Batch-aware sinks / pull-batching.
+* Instrumentation plugin system beyond logging.
+* Parallel/reducer optimizations for JS environment.
+* Append appendix with **mermaid diagrams** for request-response flow.
 
 ---
 
-### Log Lifecycle
-
-```
-Runner
-  ↓
-createLog()
-  ↓
-stage.process(input, log)
-  ↓
-runner collects log
-```
-
----
-
-### Example Log Structure
-
-```
-{
-  stage: "ParseJson",
-  data: {
-    parsed: 120,
-    failures: 3
-  }
-}
-```
-
-The final pipeline result contains:
-
-```
-{
-  result: T | null
-  logs: StageLog[]
-}
-```
-
-Where:
-
-```
-StageLog = {
-  stage: string
-  data: unknown
-}
-```
-
----
-
-### Log Isolation
-
-Stages can only access their own log.
-
-This ensures:
-
-* no cross-stage interference
-* deterministic log aggregation
-* clean stage instrumentation
-
----
-
-# 9. Example Stage
-
-Example stage implementation:
-
-```
-type ParseLog = {
-  parsed: number
-  failures: number
-}
-
-const ParseJson: Stage<string, Json, ParseLog> = {
-
-  name: "ParseJson",
-
-  createLog() {
-    return {
-      parsed: 0,
-      failures: 0
-    }
-  },
-
-  async process(input, log) {
-
-    try {
-      const obj = JSON.parse(input)
-
-      log.parsed++
-
-      return Ok(Some(obj))
-
-    } catch {
-
-      log.failures++
-
-      return Ok(None)
-
-    }
-
-  }
-}
-```
-
----
-
-# 10. Example Pipeline
-
-```
-pipeline UserSessionPipeline {
-
-  ParseJson
-  ValidateUser
-  CreateSession
-
-}
-```
-
-Type flow:
-
-```
-string → Json → User → Session
-```
-
----
-
-# 11. Final Pipeline Result
-
-Example output:
-
-```
-{
-  result: Session,
-  logs: [
-
-    {
-      stage: "ParseJson",
-      data: {
-        parsed: 120,
-        failures: 3
-      }
-    },
-
-    {
-      stage: "ValidateUser",
-      data: { ... }
-    },
-
-    {
-      stage: "CreateSession",
-      data: { ... }
-    }
-
-  ]
-}
-```
-
----
-
-# 12. Non-Goals for MVP
-
-The following features are intentionally excluded:
-
-### Pipeline Branching
-
-```
-StageA
- ├─ StageB
- └─ StageC
-```
-
-### Routing Logic
-
-Dynamic routing between stages.
-
-### Graph Pipelines
-
-Directed acyclic graph execution.
-
-### Metadata Auto-Derivation
-
-Deriving pipeline metadata from type structures.
-
-### Cross-Stage Communication
-
-Stages cannot access other stage logs or data.
-
----
-
-# 13. Future Extensions
-
-Potential future features include:
-
-### Branching Pipelines
-
-Support for conditional routing.
-
-### Parallel Stage Execution
-
-Fork/join pipeline structures.
-
-### Router Abstraction
-
-Separate routing layer once branching exists.
-
-### Pipeline Replay
-
-Deterministic replay using captured inputs and logs.
-
-### Streaming Pipelines
-
-Continuous data processing.
-
-### Enhanced Observability
-
-Built-in metrics and structured tracing.
-
----
-
-# 14. MVP Design Summary
-
-The MVP architecture prioritizes:
-
-* **simplicity**
-* **strong typing**
-* **predictable execution**
-* **minimal runtime complexity**
-
-Key properties:
-
-* linear async pipelines
-* compile-time type validation
-* runner-mediated orchestration
-* stage isolation
-* per-stage logging
-
-The result is a lightweight, type-safe pipeline system suitable for TypeScript-based applications.
+## 3. Summary
+
+The MVP design focuses on:
+
+* **Linear, pull-based pipelines**.
+* **Async-by-default reducer stages**.
+* **Instrumentation layer for logging/debugging**.
+* **Compile-time type safety**.
+* Minimal complexity in stages, runner, and SDK to allow **iterative future improvements**.
