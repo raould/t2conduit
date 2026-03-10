@@ -328,11 +328,15 @@ class AppContext implements AsyncDisposable {
 
 Resources split into two categories:
 
-**Pipeline-scoped** (live for the full `run()` call): open in the constructor, close in `[Symbol.asyncDispose]`:
+**Pipeline-scoped** (live for the full `run()` call): use a static async factory to open resources, close in `[Symbol.asyncDispose]`:
 
 ```ts
 class AppContext implements AsyncDisposable {
-  private conn = await db.connect();   // opened once
+  private constructor(private conn: DbConnection) {}
+
+  static async create(): Promise<AppContext> {
+    return new AppContext(await db.connect());   // opened once
+  }
 
   fetch: DbReader = {
     query: (sql) => this.conn.execute(sql),
@@ -342,6 +346,9 @@ class AppContext implements AsyncDisposable {
     await this.conn.close();           // closed when pipeline ends
   }
 }
+
+// Pass the factory to run():
+await run(() => AppContext.create(), pipeline, source);
 ```
 
 **Item-scoped** (live for one item's processing): managed with `try/finally` inside the generator:
@@ -562,12 +569,10 @@ This section shows how to implement t2-conduit usage in **t2-lang**, the host la
 
 ### 5.1 Notes
 
-t2-conduit uses two t2-lang constructs that are worth flagging:
+t2-conduit uses two t2-lang constructs worth noting:
 
-- **`try` with a `finally` clause** — used for per-item resource cleanup inside generator stages. The form is `(try stmt... (finally cleanup...))`. A try-finally with no catch is written `(try stmt... (finally cleanup...))`.
-- **Computed method names** — used for `[Symbol.asyncDispose]` on context classes. `methodKey` accepts `[expr]` (square brackets around an expression), so the form is `(method [(. Symbol asyncDispose)] () body...)` inside a `class-body`.
-
-Both are supported natively in t2-lang.
+- **`try/finally`** — `(try stmt... (finally cleanup...))`. Used for per-item resource cleanup inside generator stages.
+- **Computed method names** — `(method [(. Symbol asyncDispose)] () body...)` inside a `class-body`. Used for `[Symbol.asyncDispose]` on context classes.
 
 ---
 
@@ -671,7 +676,7 @@ interface DbReader {
       (const (unquote name)
         (async-lambda (((unquote ctx) : (unquote cap)))
           (async-generator-fn
-            ((upstream : ((AsyncGenerator) (unquote in-t))) : ((AsyncGenerator) (unquote out-t)))
+            ((upstream : (AsyncGenerator (unquote in-t))) : (AsyncGenerator (unquote out-t)))
             (unquote-splicing body)))))))
 ```
 
@@ -747,29 +752,28 @@ const streamFiles: Stage<FileSystem, string, string> =
 
 **Macro definition:**
 ```t2-lang
-;; (deflift name (param : in-type) : out-type body...)
+;; (deflift name fn-expr)
 ;; Always marks the result pure — deflift is only for stateless transforms.
-(defmacro deflift ((name) (param) (out-t) (rest body))
+(defmacro deflift ((name) (fn-expr))
   (return
     (quasi
       (const (unquote name)
-        (pure (lift (lambda ((unquote param) : (unquote out-t))
-                     (unquote-splicing body))))))))
+        (pure (lift (unquote fn-expr)))))))
 ```
 
 **With macro:**
 ```t2-lang
-(deflift parseJson (line : string) : LogEntry
-  (method-call JSON parse line))
+(deflift parseJson (lambda ((line : string) : LogEntry)
+  (method-call JSON parse line)))
 
-(deflift trimLine (s : string) : string
-  (method-call s trim))
+(deflift trimLine (lambda ((s : string) : string)
+  (method-call s trim)))
 
 ;; 1-to-many: return an async generator
-(deflift splitCsv (line : string) : (AsyncGenerator string)
+(deflift splitCsv (lambda ((line : string) : (AsyncGenerator string))
   (async-generator-fn ()
     (for-of cell (method-call line split ',')
-      (yield (method-call cell trim)))))
+      (yield (method-call cell trim))))))
 ```
 
 **Emitted TypeScript:**
@@ -807,8 +811,8 @@ const splitCsv  = pure(lift((line: string): AsyncGenerator<string> => async func
             (unquote-splicing
               (map slots (lambda ((slot))
                 (quasi (object
-                  (name (unquote (. slot 0)))
-                  (stage (unquote (. slot 1))))))))))))))
+                  (name (unquote (index slot 0)))
+                  (stage (unquote (index slot 1))))))))))))))
 ```
 
 **With macro:**
@@ -860,8 +864,8 @@ const logPipeline = createPipeline([
 ;;
 ;; Emits a class with one field per slot and [Symbol.asyncDispose].
 (defmacro defcontext ((name) (rest clauses))
-  (const slot-clauses   (filter clauses (lambda ((c)) (= (. c 0) :slot))))
-  (const dispose-clause (find   clauses (lambda ((c)) (= (. c 0) :dispose))))
+  (const slot-clauses   (filter clauses (lambda ((c)) (= (index c 0) :slot))))
+  (const dispose-clause (find   clauses (lambda ((c)) (= (index c 0) :dispose))))
   (return
     (quasi
       (class (unquote name)
@@ -869,9 +873,9 @@ const logPipeline = createPipeline([
         (class-body
           (unquote-splicing
             (map slot-clauses (lambda ((s))
-              (quasi (field (unquote (. s 1)) (unquote (. s 2)))))))
+              (quasi (field (unquote (index s 1)) (unquote (index s 2)))))))
           (method [(. Symbol asyncDispose)] ()
-            (unquote-splicing (. dispose-clause 1))))))))
+            (unquote-splicing (index dispose-clause 1))))))))
 ```
 
 **With macro:**
@@ -977,15 +981,16 @@ The full log-pipeline example from §3 of this document, in t2-lang:
       (message string)
       (ts number)))
 
-  (deflift parseJson (line : string) : LogEntry
-    (method-call JSON parse line))
+  (deflift parseJson (lambda ((line : string) : LogEntry)
+    (method-call JSON parse line)))
 
-  (const ^:pure errorsOnly
-    (async-lambda ((_ctx : object))
-      (async-generator-fn ((upstream : (AsyncGenerator LogEntry)) : (AsyncGenerator LogEntry))
-        (for-await entry upstream
-          (if (= (. entry level) 'error')
-            (yield entry))))))
+  (const errorsOnly
+    (pure
+      (async-lambda ((_ctx : object))
+        (async-generator-fn ((upstream : (AsyncGenerator LogEntry)) : (AsyncGenerator LogEntry))
+          (for-await entry upstream
+            (if (= (. entry level) 'error')
+              (yield entry)))))))
 
   ;; ── Pipeline ─────────────────────────────────────────────────────────────
 
