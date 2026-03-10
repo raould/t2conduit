@@ -1,0 +1,41 @@
+(program
+  (defmacro defstage ((name) (cap) (in-t) (out-t) (ctx) (rest body))
+    (return
+      (quasi
+        (const (unquote name)
+          (async-lambda (((unquote ctx) : (unquote cap)))
+            (async-generator-fn
+              ((upstream : (AsyncGenerator (unquote in-t))) : (AsyncGenerator (unquote out-t)))
+              (unquote-splicing body)))))))
+
+  (defmacro deflift ((name) (fn-expr))
+    (return
+      (quasi
+        (const (unquote name)
+          (pure (lift (unquote fn-expr)))))))
+
+  (defmacro defpipeline ((name) (rest slots))
+    (return
+      (quasi
+        (const (unquote name)
+          (createPipeline
+            (array
+              (unquote-splicing
+                (map slots (lambda ((slot))
+                  (quasi (object
+                    (name (unquote (index slot 0)))
+                    (stage (unquote (index slot 1))))))))))))))
+
+  (defmacro defcontext ((name) (rest clauses))
+    (const slot-clauses (filter clauses (lambda ((c)) (= (index c 0) :slot))))
+    (const dispose-clause (find clauses (lambda ((c)) (= (index c 0) :dispose))))
+    (return
+      (quasi
+        (class (unquote name)
+          (implements AsyncDisposable)
+          (class-body
+            (unquote-splicing
+              (map slot-clauses (lambda ((s))
+                (quasi (field (unquote (index s 1)) (unquote (index s 2)))))))
+            (method [(. Symbol asyncDispose)] ()
+              (unquote-splicing (index dispose-clause 1)))))))))
