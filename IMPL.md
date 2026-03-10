@@ -399,7 +399,7 @@ Two stages with structurally identical capability interfaces are not automatical
 ### 4.1 The `run()` Function
 
 ```ts
-const results = await run(
+const { results, logs } = await run(
   () => new AppContext(),            // context factory — called once per run
   pipeline,                         // ComposedPipeline from createPipeline
   fromArray(['query-a', 'query-b']),// source: AsyncGenerator<I>
@@ -412,14 +412,15 @@ const results = await run(
 run(ctxFactory, pipeline, source, options):
   await using ctx = ctxFactory()         // context created; dispose scheduled
   gen = compose(pipeline.slots, ctx, source)
-  gen = instrument(gen, options.hooks)   // wrap with instrumentation per slot
+  logContexts = pipeline.slots.map(slot => new StageLog(slot.name))
+  gen = instrument(gen, logContexts, options.hooks)   // wrap with instrumentation per slot
   results = []
   try:
     for item in gen:
       results.push(item)
   finally:
     ctx[Symbol.asyncDispose]()           // always runs — await using guarantees it
-  return results
+  return { results, logs: logContexts }
 ```
 
 The `await using` statement ensures `ctx[Symbol.asyncDispose]()` runs on every exit path — normal completion, early `break`, or thrown exception.
@@ -512,6 +513,7 @@ propagate internally:
 const results: string[] = await run(factory, pipeline, source);
 
 // Streaming sink: consume without accumulation
+// runWith returns only the `logs`, since result accumulation is handled by the caller.
 await runWith(factory, pipeline, source, async (gen) => {
   for await (const item of gen) {
     await db.insert(item);
@@ -559,7 +561,7 @@ instrument(gen, log, hooks):
     re-throw
 ```
 
-Each named slot gets its own isolated `StageLog` object — hooks for one stage cannot interfere with another's log context. Accumulated logs are returned alongside results at pipeline completion.
+Each named slot gets its own isolated `StageLog` object — hooks for one stage cannot interfere with another's log context. `run()` now returns both the collected `results` array and the accumulated `logs` so consumers can inspect or emit them once the pipeline finishes.
 
 ---
 
