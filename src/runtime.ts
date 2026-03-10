@@ -42,22 +42,68 @@ export interface ComposedPipeline<Slots extends readonly PipelineSlot<string, an
   slots: Slots;
 }
 
+export interface StageErrorRecord<E = unknown> {
+  slot: string;
+  context: unknown;
+  log: StageLog;
+  error: E;
+}
+
+export interface Err<E = unknown> {
+  readonly type: 'Err';
+  readonly payload: StageErrorRecord<E>;
+}
+
+/**
+ * Builds an Err payload so propagate mode can stream errors as values.
+ *
+ * @param slot the slot name where the error occurred
+ * @param context the capability context bound to that slot
+ * @param log the mutable log record for that slot (included for tracing)
+ * @param error the original error value thrown by the stage
+ */
+export const makeErr = <E = unknown>(
+  slot: string,
+  context: unknown,
+  log: StageLog,
+  error: E
+): Err<E> => ({
+  type: 'Err',
+  payload: { slot, context, log, error },
+});
+
+/**
+ * Guards whether a value is an Err produced by propagate mode.
+ *
+ * @param value arbitrary value or pipeline payload
+ * @returns true when the value matches the Err shape
+ */
+export const isErr = (value: unknown): value is Err =>
+  typeof value === 'object' && value !== null && (value as Err).type === 'Err';
+
 const createStageLog = (slot: string): StageLog => ({ slot, count: 0, errors: [] });
 
 /**
- * Wraps a stage generator with instrumentation hooks so the runtime can observe events.
+ * Wraps a stage generator with instrumentation hooks and the active error policy.
  *
  * @param gen the underlying generator produced by a stage
  * @param log mutable log record for the slot
  * @param hooks optional instrumentation hooks invoked at lifecycle events
- * @returns a generator that mirrors the original output while emitting hooks
+ * @param slotName name of the slot owning this generator
+ * @param context capability container bound to the stage
+ * @param errorMode configured error policy for the run
+ * @returns a generator that mirrors the stage output while emitting hooks and error values
  */
-const instrument = async function* <O>(
-  gen: AsyncGenerator<O>,
+const instrument = async function* (
+  gen: AsyncGenerator<any>,
   log: StageLog,
-  hooks?: InstrumentationHooks
-): AsyncGenerator<O> {
+  hooks: InstrumentationHooks | undefined,
+  slotName: string,
+  context: unknown,
+  errorMode: RunOptions['errorMode']
+): AsyncGenerator<any> {
   hooks?.onStart?.(log);
+  const mode = errorMode ?? 'fail-fast';
   try {
     for await (const item of gen) {
       log.count += 1;
@@ -68,6 +114,13 @@ const instrument = async function* <O>(
   } catch (err) {
     log.errors.push(err);
     hooks?.onError?.(log, err);
+    if (mode === 'drop') {
+      return;
+    }
+    if (mode === 'propagate') {
+      yield makeErr(slotName, context, log, err) as any;
+      return;
+    }
     throw err;
   }
 };
@@ -77,12 +130,13 @@ const composeGenerators = <I, O>(
   context: Record<string, any>,
   source: AsyncGenerator<I>,
   logs: StageLog[],
-  hooks?: InstrumentationHooks
+  options: RunOptions
 ): AsyncGenerator<O> => {
+  const { hooks, errorMode } = options;
   return slots.reduce<AsyncGenerator<any>>((gen, slot, index) => {
     const stageCtx = context[slot.name];
     const stageGen = slot.stage(stageCtx)(gen);
-    return instrument(stageGen, logs[index], hooks);
+    return instrument(stageGen, logs[index], hooks, slot.name, stageCtx, errorMode);
   }, source) as AsyncGenerator<O>;
 };
 
@@ -159,7 +213,7 @@ export const run = async <
 ): Promise<RunResult<O>> => {
   const ctx = await ctxFactory();
   const logContexts = pipeline.slots.map((slot) => createStageLog(slot.name));
-  const composed = composeGenerators<I, O>(pipeline.slots, ctx as Record<string, any>, source, logContexts, options.hooks);
+  const composed = composeGenerators<I, O>(pipeline.slots, ctx as Record<string, any>, source, logContexts, options);
   const results: O[] = [];
   try {
     for await (const item of composed) {
@@ -195,7 +249,7 @@ export const runWith = async <
 ): Promise<{ logs: StageLog[] }> => {
   const ctx = await ctxFactory();
   const logContexts = pipeline.slots.map((slot) => createStageLog(slot.name));
-  const composed = composeGenerators<I, O>(pipeline.slots, ctx as Record<string, any>, source, logContexts, options.hooks);
+  const composed = composeGenerators<I, O>(pipeline.slots, ctx as Record<string, any>, source, logContexts, options);
   try {
     await consumer(composed);
   } finally {
