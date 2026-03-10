@@ -8,10 +8,11 @@
   "main": "index.js",
   "scripts": {
     "build-debug-sdk": "npx t2tc src/t2-conduit-sdk-debug.t2",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest"
   },
   "devDependencies": {
     "t2lang": "file:../t2lang",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^1.0.0"
   }
 }
