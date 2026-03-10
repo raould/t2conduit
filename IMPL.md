@@ -560,16 +560,14 @@ Each named slot gets its own isolated `StageLog` object — hooks for one stage 
 
 This section shows how to implement t2-conduit usage in **t2-lang**, the host language. For each concept, we show the raw verbose form, then any macro that makes it cleaner, then the macro usage.
 
-### 5.1 Grammar Gaps to Note
+### 5.1 Notes
 
-Before diving in, two grammar gaps affect t2-conduit specifically:
+t2-conduit uses two t2-lang constructs that are worth flagging:
 
-| Gap | Needed For | Suggested Addition |
-|---|---|---|
-| No `try/finally` form | Per-item resource cleanup in generator stages | `(try-finally body finally-body)` or `(with-resource ...)` macro |
-| No computed method names | `[Symbol.asyncDispose]` on context classes | `(computed-method expr fnSig body...)` form, or macro emitting raw JS |
+- **`try` with a `finally` clause** — used for per-item resource cleanup inside generator stages. The form is `(try stmt... (finally cleanup...))`. A try-finally with no catch is written `(try stmt... (finally cleanup...))`.
+- **Computed method names** — used for `[Symbol.asyncDispose]` on context classes. `methodKey` accepts `[expr]` (square brackets around an expression), so the form is `(method [(. Symbol asyncDispose)] () body...)` inside a `class-body`.
 
-Both are worked around below via macros. The macros emit the required JS directly.
+Both are supported natively in t2-lang.
 
 ---
 
@@ -708,29 +706,17 @@ const fetchRows: Stage<DbReader, string, Row> =
   };
 ```
 
-**Resource cleanup inside a stage** requires `try/finally`. Until the grammar has a `try-finally` form, use a `with-resource` macro:
+**Stage with per-item resource cleanup** uses `try`/`finally` natively:
 
-```t2-lang
-;; (with-resource (binding init-expr) finally-expr body...)
-;; Emits: const binding = init-expr; try { body } finally { finally-expr }
-(defmacro with-resource ((binding init) (finally-body) (rest body))
-  ;; macro emits a raw JS try/finally block via framework escape hatch
-  (return
-    (quasi
-      (const (unquote binding) (await (unquote init)))
-      (try-finally
-        (begin (unquote-splicing body))
-        (await (unquote finally-body))))))
-```
-
-**Stage with per-item resource cleanup:**
 ```t2-lang
 (defstage streamFiles FileSystem string string ctx
   (for-await path upstream
-    (with-resource (fh (method-call ctx open path))
-                   (method-call fh close)
+    (const fh (await (method-call ctx open path)))
+    (try
       (for-await line (method-call fh lines)
-        (yield line)))))
+        (yield line))
+      (finally
+        (await (method-call fh close))))))
 ```
 
 **Emitted TypeScript:**
@@ -846,22 +832,24 @@ const logPipeline = createPipeline([
 
 ### 5.8 `defcontext` — Context Class
 
-The main grammar gap here is `[Symbol.asyncDispose]` — a computed method name. The `defcontext` macro handles this explicitly.
-
-**Raw t2-lang** (approximate — computed method names are not in the grammar yet):
+**Raw t2-lang:**
 ```t2-lang
 (class AppContext
   (implements AsyncDisposable)
   (class-body
     (field read : FileReader
       (object
-        (readLines
-          (method (async-generator-fn ((path : string) : (AsyncGenerator string))
-            ;; body)))))
-    (field parse (object))
+        (readLines (async-generator-fn ((path : string) : (AsyncGenerator string))
+          (const fh (await (method-call fs open path)))
+          (try
+            (for-await line (method-call fh readLines)
+              (yield line))
+            (finally
+              (await (method-call fh close))))))))
+    (field parse  (object))
     (field filter (object))
-    ;; [Symbol.asyncDispose] requires macro or grammar extension
-    ))
+    (method [(. Symbol asyncDispose)] ()
+      (await (method-call db close)))))
 ```
 
 **Macro definition:**
@@ -882,8 +870,7 @@ The main grammar gap here is `[Symbol.asyncDispose]` — a computed method name.
           (unquote-splicing
             (map slot-clauses (lambda ((s))
               (quasi (field (unquote (. s 1)) (unquote (. s 2)))))))
-          ;; computed method emitted as raw node
-          (computed-method (. Symbol asyncDispose) ()
+          (method [(. Symbol asyncDispose)] ()
             (unquote-splicing (. dispose-clause 1))))))))
 ```
 
@@ -893,10 +880,12 @@ The main grammar gap here is `[Symbol.asyncDispose]` — a computed method name.
   (:slot read
     (object
       (readLines (async-generator-fn ((path : string) : (AsyncGenerator string))
-        (with-resource (fh (method-call fs open path))
-                       (method-call fh close)
+        (const fh (await (method-call fs open path)))
+        (try
           (for-await line (method-call fh readLines)
-            (yield line)))))))
+            (yield line))
+          (finally
+            (await (method-call fh close))))))))
   (:slot parse  (object))
   (:slot filter (object))
   (:dispose
@@ -1011,10 +1000,12 @@ The full log-pipeline example from §3 of this document, in t2-lang:
     (:slot read
       (object
         (readLines (async-generator-fn ((path : string) : (AsyncGenerator string))
-          (with-resource (fh (method-call fs open path))
-                         (method-call fh close)
+          (const fh (await (method-call fs open path)))
+          (try
             (for-await line (method-call fh readLines)
-              (yield line)))))))
+              (yield line))
+            (finally
+              (await (method-call fh close))))))))
     (:slot parse  (object))
     (:slot filter (object))
     (:dispose))  ;; no top-level cleanup needed
