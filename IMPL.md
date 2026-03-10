@@ -10,6 +10,12 @@ This document covers how to use t2-conduit to build typed, pull-based data pipel
 
 ---
 
+## 0. T2-Lang Grammar
+
+* Read t2-lang.g4
+
+---
+
 ## 1. Making a Stage
 
 ### 1.1 What a Stage Is
