@@ -1,0 +1,17 @@
+{
+    "name": "split-words",
+    "version": "0.0.1",
+    "description": "examples for t2 conduit",
+    "keywords": [],
+    "license": "CC0-1.0",
+    "author": "",
+    "type": "module",
+    "main": "index.js",
+    "scripts": {
+        "build": "npx t2tc --outDir=out --macro-prelude=../../node_modules/t2conduit/dist-macros/macros.t2 src/split-words.t2",
+        "test": "echo 'no tests'"
+    },
+    "dependencies": {
+        "t2conduit": "*"
+    }
+}

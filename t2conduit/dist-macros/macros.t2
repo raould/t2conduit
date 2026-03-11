@@ -1,0 +1,65 @@
+(program
+    (defmacro defstage ((name) (cap) (in-t) (out-t) (ctx) (rest body))
+      (let* ((node
+          (quasi
+            (const stage-placeholder
+              (async-lambda (((unquote ctx) : (unquote cap)))
+                (async-generator-fn
+                  ((upstream : (AsyncGenerator (unquote in-t))) : (AsyncGenerator (unquote out-t)))
+                  (unquote-splicing body)))))))
+        (set! (. node name) (. name name))
+        (return node)))
+
+    (defmacro deflift ((name) (fn-expr))
+      (let* ((node
+          (quasi
+            (const lift-placeholder
+              (pure (lift (unquote fn-expr)))))))
+        (set! (. node name) (. name name))
+        (return node)))
+
+    (defmacro defpipeline ((name) (rest slots))
+      (let* ((node
+          (quasi
+            (const pipeline-placeholder
+              (createPipeline
+                (array
+                  (unquote-splicing
+                    (map slots (lambda ((slot))
+                      (quasi (object
+                        (name (unquote (. (. slot fn) name)))
+                        (stage (unquote (index (. slot args) 0))))))))))))))
+        (set! (. node name) (. name name))
+        (return node)))
+
+    (defmacro defcontext ((name) (rest clauses))
+      (let* ((slot-clauses (filter clauses (lambda ((c)) (=== (. (. c fn) value) :slot))))
+             (dispose-clause (find clauses (lambda ((c)) (=== (. (. c fn) value) :dispose))))
+             (dispose-body (ternary dispose-clause (. dispose-clause args) (array)))
+             (field-nodes
+               (map slot-clauses (lambda ((s))
+                 (let* ((field-node
+                     (quasi (field context-slot-placeholder
+                              (unquote (index (. s args) 1))))))
+                   (set! (. field-node name) (. (index (. s args) 0) name))
+                   (return field-node)))))
+             (node
+               (quasi
+                 (class context-placeholder
+                   (implements AsyncDisposable)
+                   (class-body
+                     (unquote-splicing field-nodes)
+                     (method [(. Symbol asyncDispose)] ()
+                       (unquote-splicing dispose-body)))))))
+        (set! (. node name) (. name name))
+        (return node)))
+
+    (defmacro defcap ((name) (rest methods))
+      (let* ((node
+          (quasi
+            (interface cap-placeholder
+              ((unquote-splicing methods))))))
+        (set! (. node name) (. name name))
+        (return node)))
+
+)

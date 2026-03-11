@@ -1,0 +1,22 @@
+{
+  "name": "t2conduit",
+  "version": "0.0.1",
+  "description": "typescript library inspired by haskell-conduit",
+  "license": "CC0-1.0",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "build": "npm run build-t2 && npm run build-ts",
+    "build-t2": "mkdir -p dist-macros && cp src/*.t2 dist-macros",
+    "build-ts": "esbuild src/*.ts --outdir=dist --format=esm --target=es2020",
+    "test": "npx vitest run"
+  },
+  "dependencies": {
+    "t2lang": "file:../t2lang",
+    "vitest": "^4.0.18"
+  }
+}

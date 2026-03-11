@@ -3,7 +3,7 @@ https://github.com/raould/t2lang
 Code written for this project is in t2lang sexpr format.
 .t2 code files must be (1) compiled to .ts using t2tc, (2) compiled to .js using tsc, (3) smoke-checked by running with node.
 
-Read node_modules/t2lang/phaseB/GRAMMAR.md.
+Read node_modules/t2lang/stage8/Stage8.g4.
 This is the specific sexpr syntax to be generating.
 The semantics are that of typescript (and thus javascript).
 

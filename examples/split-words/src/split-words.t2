@@ -1,0 +1,131 @@
+(program
+  (import (object (run) (fromArray)) 't2-conduit')
+
+  ;; Purpose: emit trimmed tokens from whitespace-delimited input sentences.
+  ;; Inputs: string values captured from upstream sources.
+  ;; Outputs: individual words whose casing is preserved and empty fragments are dropped.
+  ;; Invariants: consecutive whitespace collapses into zero tokens and trimming removes bordering spaces.
+  ;; Examples:
+  ;; (await
+  ;;   (run (lambda () (new example-context))
+  ;;     word-length-pipeline
+  ;;     (fromArray (array 'The quick brown fox' 'jumps over the lazy dog'))
+  ;;     (object (errorMode :fail-fast))))
+  ;; (await
+  ;;   (run (lambda () (new example-context))
+  ;;     word-length-pipeline
+  ;;     (fromArray (array '  Leading and trailing  ' 'Multiple   spaces here     '))
+  ;;     (object (errorMode :fail-fast))))
+  (deflift split-words (lambda ((text : string)) : (AsyncGenerator string)
+    (async-generator-fn ()
+      (for-of raw (method-call text split ' ')
+        (const (trimmed) (method-call raw trim))
+        (if (not (= trimmed ''))
+          (yield trimmed))))))
+
+  (interface WordLength
+    (WordLength
+      (word string)
+      (length number)))
+
+  ;; Purpose: attach word-length metadata to every token produced by split-words.
+  ;; Inputs: string tokens emitted downstream from split-words.
+  ;; Outputs: WordLength records pairing each token with its trimmed character count.
+  ;; Invariants: reported lengths match (. token length) after trimming.
+  ;; Examples:
+  ;; (await
+  ;;   (run (lambda () (new example-context))
+  ;;     word-length-pipeline
+  ;;     (fromArray (array 'The quick brown fox' 'jumps over the lazy dog'))
+  ;;     (object (errorMode :fail-fast))))
+  ;; (await
+  ;;   (run (lambda () (new example-context))
+  ;;     word-length-pipeline
+  ;;     (fromArray (array '  Leading and trailing  ' 'Multiple   spaces here     '))
+  ;;     (object (errorMode :fail-fast))))
+  (deflift measure-word-length (lambda ((token : string)) : WordLength
+    (object
+      (word token)
+      (length (. token length)))))
+
+  ;; Purpose: render WordLength records as sentences summarizing character counts.
+  ;; Inputs: WordLength objects produced by measure-word-length.
+  ;; Outputs: human-readable strings such as "Word fox has 3 characters".
+  ;; Invariants: descriptions reuse the original trimmed word and its precise length.
+  ;; Examples:
+  ;; (await
+  ;;   (run (lambda () (new example-context))
+  ;;     word-length-pipeline
+  ;;     (fromArray (array 'The quick brown fox' 'jumps over the lazy dog'))
+  ;;     (object (errorMode :fail-fast))))
+  ;; (await
+  ;;   (run (lambda () (new example-context))
+  ;;     word-length-pipeline
+  ;;     (fromArray (array '  Leading and trailing  ' 'Multiple   spaces here     '))
+  ;;     (object (errorMode :fail-fast))))
+  (deflift describe-word-length (lambda ((info : WordLength)) : string
+    (template
+      'Word '
+      (. info word)
+      ' has '
+      (. info length)
+      ' characters.'))))
+
+  ;; Purpose: split sentences, measure every token, and format the length description.
+  ;; Inputs: string sentences arriving via fromArray.
+  ;; Outputs: descriptive strings illustrating the size of each word in order.
+  ;; Invariants: slot order preserves upstream sequence and error handling remains fail-fast.
+  ;; Examples:
+  ;; (await
+  ;;   (run (lambda () (new example-context))
+  ;;     word-length-pipeline
+  ;;     (fromArray (array 'The quick brown fox' 'jumps over the lazy dog'))
+  ;;     (object (errorMode :fail-fast))))
+  ;; (await
+  ;;   (run (lambda () (new example-context))
+  ;;     word-length-pipeline
+  ;;     (fromArray (array '  Leading and trailing  ' 'Multiple   spaces here     '))
+  ;;     (object (errorMode :fail-fast))))
+  (defpipeline word-length-pipeline
+    ('split  split-words)
+    ('measure measure-word-length)
+    ('describe describe-word-length))
+
+  ;; Purpose: provide empty capability slots so that every stage receives the expected {} context.
+  ;; Inputs: none; construction happens via new example-context.
+  ;; Outputs: AsyncDisposable context that never needs cleanup beyond the stubbed asyncDispose method.
+  ;; Invariants: each slot resolves to an object; disposal is a no-op.
+  ;; Examples:
+  ;; (lambda () (new example-context))
+  ;; (await
+  ;;   (run (lambda () (new example-context))
+  ;;     word-length-pipeline
+  ;;     (fromArray (array 'The quick brown fox' 'jumps over the lazy dog'))
+  ;;     (object (errorMode :fail-fast))))
+  (defcontext example-context
+    (:slot split (object))
+    (:slot measure (object))
+    (:slot describe (object)))
+
+  (const sentence-results
+    (await
+      (run
+        (lambda () (new example-context))
+        word-length-pipeline
+        (fromArray (array 'The quick brown fox' 'jumps over the lazy dog'))
+        (object (errorMode :fail-fast)))))
+
+  (method-call console log
+    (template 'Sentence pipeline results: ' (. sentence-results results)))
+
+  (const padded-results
+    (await
+      (run
+        (lambda () (new example-context))
+        word-length-pipeline
+        (fromArray (array '  Leading and trailing  ' 'Multiple   spaces here     '))
+        (object (errorMode :fail-fast)))))
+
+  (method-call console log
+    (template 'Padded input pipeline results: ' (. padded-results results)))
+)
