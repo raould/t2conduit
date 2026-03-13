@@ -3,8 +3,8 @@
       (let* ((node
           (quasi
             (const stage_placeholder
-              (async_lambda (((unquote ctx) : (unquote cap)))
-                (async_generator_fn
+              (async-lambda (((unquote ctx) : (unquote cap)))
+                (async-generator-fn
                   ((upstream : (AsyncGenerator (unquote in_t))) : (AsyncGenerator (unquote out_t)))
                   (unquote-splicing body)))))))
         (set! (. node name) (. name name))
@@ -46,7 +46,7 @@
                (quasi
                  (class context_placeholder
                    (implements AsyncDisposable)
-                   (class_body
+                   (class-body
                      (unquote-splicing field_nodes)
                      (method [(. Symbol asyncDispose)] ()
                        (unquote-splicing dispose_body)))))))
