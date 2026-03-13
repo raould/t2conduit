@@ -3,10 +3,10 @@
       (let* ((node
           (quasi
             (const stage_placeholder
-              (async_lambda (((unquote ctx) : (unquote cap)))
-                (async_generator_fn
+              (async-lambda (((unquote ctx) : (unquote cap)))
+                (async-generator-fn
                   ((upstream : (AsyncGenerator (unquote in_t))) : (AsyncGenerator (unquote out_t)))
-                  (unquote_splicing body)))))))
+                  (unquote-splicing body)))))))
         (set! (. node name) (. name name))
         (return node)))
 
@@ -19,46 +19,38 @@
         (return node)))
 
     (defmacro defpipeline ((name) (rest slots))
-      (let* ((node
-          (quasi
-            (const pipeline_placeholder
-              (createPipeline
-                (array
-                  (unquote_splicing
-                    (map slots (lambda ((slot))
-                      (quasi (object
-                        (name (unquote (. (. slot fn) name)))
-                        (stage (unquote (index (. slot args) 0))))))))))))))
-        (set! (. node name) (. name name))
-        (return node)))
+      (return
+        (quasi
+          (const (unquote name)
+            (createPipeline
+              (array
+                (unquote-splicing
+                  (map slots (lambda ((slot))
+                    (quasi (object
+                      (name (unquote (index slot 0)))
+                      (stage (unquote (index slot 1))))))))))))))
 
     (defmacro defcontext ((name) (rest clauses))
-      (let* ((slot_clauses (filter clauses (lambda ((c)) (=== (. (. c fn) value) :slot))))
-             (dispose_clause (find clauses (lambda ((c)) (=== (. (. c fn) value) :dispose))))
-             (dispose_body (ternary dispose_clause (. dispose_clause args) (array)))
-             (field_nodes
-               (map slot_clauses (lambda ((s))
-                 (let* ((field_node
-                     (quasi (field context_slot_placeholder
-                              (unquote (index (. s args) 1))))))
-                   (set! (. field_node name) (. (index (. s args) 0) name))
-                   (return field_node)))))
+      (let* ((slot_clauses   (filter clauses (lambda ((c)) (= (index c 0) :slot))))
+             (dispose_clause (find   clauses (lambda ((c)) (= (index c 0) :dispose))))
+             (dispose_body  (ternary dispose_clause (index dispose_clause 1) (array)))
              (node
                (quasi
-                 (class context_placeholder
+                 (class (unquote name)
                    (implements AsyncDisposable)
-                   (class_body
-                     (unquote_splicing field_nodes)
+                   (class-body
+                     (unquote-splicing
+                       (map slot_clauses (lambda ((s))
+                         (quasi (field (unquote (index s 1)) (unquote (index s 2)))))))
                      (method [(. Symbol asyncDispose)] ()
-                       (unquote_splicing dispose_body)))))))
-        (set! (. node name) (. name name))
+                       (unquote-splicing dispose_body)))))))
         (return node)))
 
     (defmacro defcap ((name) (rest methods))
       (let* ((node
           (quasi
             (interface cap_placeholder
-              ((unquote_splicing methods))))))
+              ((unquote-splicing methods))))))
         (set! (. node name) (. name name))
         (return node)))
 

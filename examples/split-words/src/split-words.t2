@@ -1,5 +1,5 @@
 (program
-  (import (object (run) (fromArray)) 't2conduit')
+  (import (object (run) (fromArray) (lift) (pure) (createPipeline)) "t2conduit")
 
   ;; Purpose: emit trimmed tokens from whitespace_delimited input sentences.
   ;; Inputs: string values captured from upstream sources.
@@ -16,12 +16,12 @@
   ;;     word_length_pipeline
   ;;     (fromArray (array '  Leading and trailing  ' 'Multiple   spaces here     '))
   ;;     (object (errorMode :fail_fast))))
-  (deflift split_words (lambda ((text : string)) : (AsyncGenerator string)
-    (async-generator-fn ()
-      (for-of raw (method-call text split ' ')
-        (const (trimmed) (method-call raw trim))
-        (if (not (== trimmed ''))
-          (yield trimmed))))))
+  (deflift split_words
+        (async-generator-fn ((text : string))
+          (for-of raw (method-call text split ' ')
+            (const (trimmed) (method-call raw trim))
+            (if (! (== trimmed ''))
+              (yield trimmed)))))
 
   (interface WordLength
     (WordLength
@@ -44,9 +44,10 @@
   ;;     (fromArray (array '  Leading and trailing  ' 'Multiple   spaces here     '))
   ;;     (object (errorMode :fail_fast))))
   (deflift measure_word_length (lambda ((token : string)) : WordLength
-    (object
-      (word token)
-      (length (. token length)))))
+    (return
+      (object
+        (word token)
+        (length (. token length))))))
 
   ;; Purpose: render WordLength records as sentences summarizing character counts.
   ;; Inputs: WordLength objects produced by measure_word_length.
@@ -64,12 +65,13 @@
   ;;     (fromArray (array '  Leading and trailing  ' 'Multiple   spaces here     '))
   ;;     (object (errorMode :fail_fast))))
   (deflift describe_word_length (lambda ((info : WordLength)) : string
-    (template
-      'Word '
-      (. info word)
-      ' has '
-      (. info length)
-      ' characters.')))
+    (return
+      (template
+        'Word '
+        (. info word)
+        ' has '
+        (. info length)
+        ' characters.'))))
 
   ;; Purpose: split sentences, measure every token, and format the length description.
   ;; Inputs: string sentences arriving via fromArray.
@@ -86,10 +88,12 @@
   ;;     word_length_pipeline
   ;;     (fromArray (array '  Leading and trailing  ' 'Multiple   spaces here     '))
   ;;     (object (errorMode :fail_fast))))
-  (defpipeline word_length_pipeline
-    (split  split_words)
-    (measure measure_word_length)
-    (describe describe_word_length))
+  (const word_length_pipeline
+    (createPipeline
+      (array
+        (object (name "split") (stage split_words))
+        (object (name "measure") (stage measure_word_length))
+        (object (name "describe") (stage describe_word_length)))))
 
   ;; Purpose: provide empty capability slots so that every stage receives the expected {} context.
   ;; Inputs: none; construction happens via new example_context.
@@ -102,10 +106,13 @@
   ;;     word_length_pipeline
   ;;     (fromArray (array 'The quick brown fox' 'jumps over the lazy dog'))
   ;;     (object (errorMode :fail_fast))))
-  (defcontext example_context
-    (:slot split (object))
-    (:slot measure (object))
-    (:slot describe (object)))
+  (class example_context
+    (implements AsyncDisposable)
+    (class-body
+      (field split (object))
+      (field measure (object))
+      (field describe (object))
+      (method [(. Symbol asyncDispose)] ())))
 
   (const sentence_results
     (await
@@ -113,8 +120,7 @@
         (lambda () (new example_context))
         word_length_pipeline
         (fromArray (array 'The quick brown fox' 'jumps over the lazy dog'))
-        (object (errorMode :fail_fast)))))
-
+        (object (errorMode 'fail-fast')))))
   (method-call console log
     (template 'Sentence pipeline results: ' (. sentence_results results)))
 
@@ -124,7 +130,7 @@
         (lambda () (new example_context))
         word_length_pipeline
         (fromArray (array '  Leading and trailing  ' 'Multiple   spaces here     '))
-        (object (errorMode :fail_fast)))))
+        (object (errorMode 'fail-fast')))))
 
   (method-call console log
     (template 'Padded input pipeline results: ' (. padded_results results)))

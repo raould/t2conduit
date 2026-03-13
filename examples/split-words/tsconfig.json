@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023", "ESNext.Disposable"],
+    "types": ["node"],
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "typeRoots": ["./node_modules/@types", "../../node_modules/@types", "./"]
+  },
+  "files": [
+    "types.d.ts",
+    "out/split-words.ts"
+  ]
+}
