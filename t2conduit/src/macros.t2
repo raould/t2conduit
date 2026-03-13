@@ -1,27 +1,27 @@
 (program
-    (defmacro defstage ((name) (cap) (in-t) (out-t) (ctx) (rest body))
+    (defmacro defstage ((name) (cap) (in_t) (out_t) (ctx) (rest body))
       (let* ((node
           (quasi
-            (const stage-placeholder
-              (async-lambda (((unquote ctx) : (unquote cap)))
-                (async-generator-fn
-                  ((upstream : (AsyncGenerator (unquote in-t))) : (AsyncGenerator (unquote out-t)))
+            (const stage_placeholder
+              (async_lambda (((unquote ctx) : (unquote cap)))
+                (async_generator_fn
+                  ((upstream : (AsyncGenerator (unquote in_t))) : (AsyncGenerator (unquote out_t)))
                   (unquote-splicing body)))))))
         (set! (. node name) (. name name))
         (return node)))
 
-    (defmacro deflift ((name) (fn-expr))
+    (defmacro deflift ((name) (fn_expr))
       (let* ((node
           (quasi
-            (const lift-placeholder
-              (pure (lift (unquote fn-expr)))))))
+            (const lift_placeholder
+              (pure (lift (unquote fn_expr)))))))
         (set! (. node name) (. name name))
         (return node)))
 
     (defmacro defpipeline ((name) (rest slots))
       (let* ((node
           (quasi
-            (const pipeline-placeholder
+            (const pipeline_placeholder
               (createPipeline
                 (array
                   (unquote-splicing
@@ -33,31 +33,30 @@
         (return node)))
 
     (defmacro defcontext ((name) (rest clauses))
-      (let* ((slot-clauses (filter clauses (lambda ((c)) (=== (. (. c fn) value) :slot))))
-             (dispose-clause (find clauses (lambda ((c)) (=== (. (. c fn) value) :dispose))))
-             (dispose-body (ternary dispose-clause (. dispose-clause args) (array)))
-             (field-nodes
-               (map slot-clauses (lambda ((s))
-                 (let* ((field-node
-                     (quasi (field context-slot-placeholder
-                              (unquote (index (. s args) 1))))))
-                   (set! (. field-node name) (. (index (. s args) 0) name))
-                   (return field-node)))))
+      (let* ((slot_clauses (filter clauses (lambda ((c)) (=== (. (. c fn) value) :slot))))
+             (dispose_clause (find clauses (lambda ((c)) (=== (. (. c fn) value) :dispose))))
+             (dispose_body (ternary dispose_clause (. dispose_clause args) (array)))
+             (field_nodes
+               (map slot_clauses (lambda ((s))
+                 (let* ((field_node
+                     (quasi (field context_slot_placeholder))))
+                   (set! (. field_node name) (. (index (. s args) 0) name))
+                   (return field_node)))))
              (node
                (quasi
-                 (class context-placeholder
+                 (class context_placeholder
                    (implements AsyncDisposable)
-                   (class-body
-                     (unquote-splicing field-nodes)
+                   (class_body
+                     (unquote-splicing field_nodes)
                      (method [(. Symbol asyncDispose)] ()
-                       (unquote-splicing dispose-body)))))))
+                       (unquote-splicing dispose_body)))))))
         (set! (. node name) (. name name))
         (return node)))
 
     (defmacro defcap ((name) (rest methods))
       (let* ((node
           (quasi
-            (interface cap-placeholder
+            (interface cap_placeholder
               ((unquote-splicing methods))))))
         (set! (. node name) (. name name))
         (return node)))

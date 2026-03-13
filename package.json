@@ -13,8 +13,8 @@
     ],
     "scripts": {
         "build": "npm run build --workspaces",
-        "start:ex1": "npm start --workspace=split-words",
-        "test": "npm run test --workspaces"
+        "test": "npm run test --workspaces",
+        "start:ex1": "npm start --workspace=split-words"
     },
     "devDependencies": {
         "esbuild": "^0.27.3",

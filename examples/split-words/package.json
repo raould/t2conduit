@@ -9,7 +9,8 @@
     "main": "index.js",
     "scripts": {
         "build": "npx t2tc --outDir=out --macro-prelude=../../node_modules/t2conduit/dist-macros/macros.t2 src/split-words.t2",
-        "test": "echo 'no tests'"
+        "test": "echo 'no tests'",
+        "start": "node out/split-words.js"
     },
     "dependencies": {
         "t2conduit": "*"
