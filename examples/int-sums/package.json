@@ -1,0 +1,17 @@
+{
+  "name": "int-sums",
+  "version": "0.0.1",
+  "description": "t2conduit integer summation example",
+  "type": "module",
+  "scripts": {
+    "build": "npx t2tc --outDir=out --macro-prelude=../../node_modules/t2conduit/dist-macros/macros.t2 src/int-sums.t2",
+    "start": "npm run build && npx tsc --project tsconfig.json && node out/int-sums.js",
+    "test": "echo 'no tests'"
+  },
+  "dependencies": {
+    "t2conduit": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0"
+  }
+}

@@ -14,7 +14,8 @@
     "scripts": {
         "build": "npm run build --workspaces",
         "test": "npm run test --workspaces",
-        "start:ex1": "npm start --workspace=split-words"
+        "start:ex0": "npm start --workspace=int-sums",
+        "start:ex1": "npm start --workspace=split-words" 
     },
     "devDependencies": {
         "esbuild": "^0.27.3",

@@ -31,8 +31,8 @@
                       (stage (unquote (index slot 1))))))))))))))
 
     (defmacro defcontext ((name) (rest clauses))
-      (let* ((slot_clauses   (filter clauses (lambda ((c)) (= (index c 0) :slot))))
-             (dispose_clause (find   clauses (lambda ((c)) (= (index c 0) :dispose))))
+      (let* ((slot_clauses   (filter clauses (lambda ((c)) (== (index c 0) :slot))))
+             (dispose_clause (find   clauses (lambda ((c)) (== (index c 0) :dispose))))
              (dispose_body  (ternary dispose_clause (index dispose_clause 1) (array)))
              (node
                (quasi

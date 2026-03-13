@@ -872,8 +872,8 @@ const logPipeline = createPipeline([
 ;;
 ;; Emits a class with one field per slot and [Symbol.asyncDispose].
 (defmacro defcontext ((name) (rest clauses))
-  (const slot-clauses   (filter clauses (lambda ((c)) (= (index c 0) :slot))))
-  (const dispose-clause (find   clauses (lambda ((c)) (= (index c 0) :dispose))))
+  (const slot-clauses   (filter clauses (lambda ((c)) (== (index c 0) :slot))))
+  (const dispose-clause (find   clauses (lambda ((c)) (== (index c 0) :dispose))))
   (return
     (quasi
       (class (unquote name)
@@ -1005,7 +1005,7 @@ The full log-pipeline example from §3 of this document, in t2-lang:
       (async-lambda ((_ctx : object))
         (async-generator-fn ((upstream : (AsyncGenerator LogEntry)) : (AsyncGenerator LogEntry))
           (for-await entry upstream
-            (if (= (. entry level) 'error')
+            (if (== (. entry level) 'error')
               (yield entry)))))))
 
   ;; ── Pipeline ─────────────────────────────────────────────────────────────

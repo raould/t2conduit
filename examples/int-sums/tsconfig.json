@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023", "ESNext.Disposable"],
+    "types": ["node"],
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "typeRoots": ["./node_modules/@types", "../../node_modules/@types", "./"],
+    "paths": {
+      "t2conduit/dist/runtime.js": ["../../t2conduit/src/runtime"],
+      "t2conduit/dist/helpers.js": ["../../t2conduit/src/helpers"]
+    },
+    "strict": true
+  },
+  "include": [
+    "types.d.ts",
+    "out/**/*.ts"
+  ]
+}

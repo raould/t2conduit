@@ -1,0 +1,126 @@
+(program
+  (import
+    (object
+      (:named (array
+        (object (:name "createPipeline"))
+        (object (:name "run"))
+        (object (:name "pure"))
+        (object (:name "lift")))))
+    "t2conduit/dist/runtime.js")
+  (import
+    (object
+      (:named (array
+        (object (:name "fromArray")))))
+    "t2conduit/dist/helpers.js")
+
+  ;; Purpose: yield a closed integer range from start to end inclusive.
+  ;; Inputs: start (number) lower bound; end (number) upper bound.
+  ;; Outputs: AsyncGenerator<number> emitting every integer start..end.
+  ;; Invariants: assumes start <= end; emits in ascending order.
+  ;; Examples:
+  ;; (range_source 1 3)
+  ;; (range_source 5 5)
+  (const range_source
+    (async-generator-fn ((start : number) (end : number))
+      (for (let (i) start) (<= i end) (set! i (+ i 1))
+        (yield i))))
+
+  ;; Purpose: double even integers while leaving odds untouched.
+  ;; Inputs: value (number) from upstream stages.
+  ;; Outputs: number, doubled when even.
+  ;; Invariants: preserves original value for odd numbers.
+  ;; Examples:
+  ;; (double_evens 2)
+  ;; (double_evens 3)
+  (deflift double_evens (async-lambda ((value : number)) : (Promise number)
+    (return
+      (ternary (== (% value 2) 0)
+        (* value 2)
+        value))))
+
+  ;; Purpose: accumulate a stream of integers into a single sum result.
+  ;; Inputs: numbers arriving from upstream generator.
+  ;; Outputs: one number equal to the total sum.
+  ;; Invariants: yields exactly once after upstream completion; initial sum is 0.
+  ;; Examples:
+  ;; (await (run (lambda () (new example_context)) sum_pipeline (fromArray (array 1 2 3)) (object (errorMode 'fail-fast))))
+  ;; (await (run (lambda () (new example_context)) sum_pipeline (fromArray (array 10 20)) (object (errorMode 'fail-fast))))
+  (const sum_integers
+    (lambda ((ctx : unknown))
+      (return
+        (async-generator-fn ((upstream : (AsyncGenerator number))) : (AsyncGenerator number)
+          (let* ((total 0))
+            (for-await value upstream
+              (set! total (+ total value)))
+            (yield total))))))
+
+  ;; Purpose: pipeline that sums integers directly.
+  ;; Inputs: upstream integer generator.
+  ;; Outputs: single sum emitted by sum_integers.
+  ;; Invariants: stage order: sum only.
+  ;; Examples:
+  ;; (await (run (lambda () (new example_context)) sum_pipeline (range_source 1 3) (object (errorMode 'fail-fast))))
+  ;; (await (run (lambda () (new example_context)) sum_pipeline (fromArray (array 5 6)) (object (errorMode 'fail-fast))))
+  (const sum_pipeline
+    (createPipeline
+      (array
+        (object
+          (name "sum")
+          (stage sum_integers)))))
+
+  ;; Purpose: pipeline that doubles even integers before summing.
+  ;; Inputs: upstream integer generator.
+  ;; Outputs: single sum after even doubling.
+  ;; Invariants: double_evens precedes sum_integers.
+  ;; Examples:
+  ;; (await (run (lambda () (new example_context)) doubled_sum_pipeline (range_source 1 4) (object (errorMode 'fail-fast))))
+  ;; (await (run (lambda () (new example_context)) doubled_sum_pipeline (fromArray (array 2 3 4)) (object (errorMode 'fail-fast))))
+  (const doubled_sum_pipeline
+    (createPipeline
+      (array
+        (object
+          (name "double")
+          (stage double_evens))
+        (object
+          (name "sum")
+          (stage sum_integers)))))
+
+  ;; Purpose: provide empty capability slots for pipelines.
+  ;; Inputs: none.
+  ;; Outputs: AsyncDisposable context with stub disposal.
+  ;; Invariants: slots exist for double and sum stages.
+  ;; Examples:
+  ;; (lambda () (new example_context))
+  ;; (await (run (lambda () (new example_context)) sum_pipeline (range_source 1 3) (object (errorMode 'fail-fast))))
+  (class example_context
+    (implements AsyncDisposable)
+    (class-body
+      (field double (object))
+      (field sum (object))
+      (method [(. Symbol asyncDispose)] () (returns (Promise void))
+        (return (Promise.resolve undefined)))))
+
+  (const base_results
+    (await
+      (run
+        (lambda ()
+          (return (new example_context)))
+        sum_pipeline
+        (range_source 1 10)
+        (object (errorMode 'fail-fast')))))
+
+  (const doubled_results
+    (await
+      (run
+        (lambda ()
+          (return (new example_context)))
+        doubled_sum_pipeline
+        (range_source 1 10)
+        (object (errorMode 'fail-fast')))))
+
+  (method-call console log
+    (template 'Base sum (1..10): ' (. base_results results)))
+
+  (method-call console log
+    (template 'Doubled even sum (1..10): ' (. doubled_results results)))
+)
